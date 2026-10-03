@@ -15,13 +15,33 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-ARG BASE_IMAGE=ghcr.io/nvidia/openshell-community/sandboxes/base@sha256:aeef1c63f00e2913ea002ccb3aaf925f338b5c5d70e63576f0d95c16a138044e
-FROM ${BASE_IMAGE}
+# ghcr.io/openkaiden/openshell-image-base-builder:next
+FROM ghcr.io/openkaiden/openshell-image-base-builder@sha256:9ed6a310ace8f3f5cb6e7ccfb06329a3f25f4c9e6f7385eb3528eb17b9fdba75 AS builder
+ARG CLAUDE_CODE_VERSION=2.1.286
+ARG BUN_VERSION="bun-v1.4.2"
+ARG CLAUDE_AGENT_ACP_VERSION=v0.85.0
+ARG CLAUDE_AGENT_ACP_SHA=c84845272fe3c55c1f97759f00ee48a1356fccae
 
-USER root
+# Install Claude and then copy it inside the root filesystem
+RUN set -eux; \
+    curl -fsSL https://claude.ai/install.sh | bash -s -- "${CLAUDE_CODE_VERSION}"; \
+    install -D -m 0755 "$(readlink -f /root/.local/bin/claude)" /mnt/rootfs/usr/local/bin/claude
 
-RUN npm install -g @agentclientprotocol/claude-agent-acp@0.64.0
+# Build the ACP wrapper with bun and copy it inside the root filesystem
+RUN set -eux; \
+    dnf install -y git unzip; \
+    curl -fsSL https://bun.com/install | bash -s -- "${BUN_VERSION}"; \
+    install -D -m 0755 "$(readlink -f /root/.bun/bin/bun)" /usr/local/bin/bun; \
+    # clone the ACP tag and check it still points to the expected commit
+    git clone --depth 1 --branch "${CLAUDE_AGENT_ACP_VERSION}" https://github.com/agentclientprotocol/claude-agent-acp /tmp/claude-agent-acp; \
+    test "$(git -C /tmp/claude-agent-acp rev-parse HEAD)" = "${CLAUDE_AGENT_ACP_SHA}"; \
+    cd /tmp/claude-agent-acp; \
+    bun install; \
+    bun build --compile src/index.ts --outfile /mnt/rootfs/usr/local/bin/claude-agent-acp
 
-USER sandbox
-
-ENTRYPOINT ["/bin/bash"]
+# Now create our final image with reduced layers
+FROM scratch
+COPY --from=builder /mnt/rootfs/ /
+# Notify the SDK/ACP client where claude binary is located
+ENV CLAUDE_CODE_EXECUTABLE=/usr/local/bin/claude
+CMD ["claude", "--dangerously-skip-permissions"]

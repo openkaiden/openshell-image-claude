@@ -31,6 +31,6 @@ on:
 
 jobs:
   build:
-    uses: openkaiden/gh-actions/.github/workflows/oci-image.yaml@1423c154f0c6b6b90b88137fdc9bfd07c00b67a4 # main
+    uses: openkaiden/gh-actions/.github/workflows/oci-image.yaml@da905b7ca937b8cfe1b2efc9e0310c6635d25732 # main
     with:
       push: true
