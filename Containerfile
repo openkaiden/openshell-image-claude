@@ -39,9 +39,25 @@ RUN set -eux; \
     bun install; \
     bun build --compile src/index.ts --outfile /mnt/rootfs/usr/local/bin/claude-agent-acp
 
+# Route claude invocations through the launcher: it hands the OpenShell-managed
+# API key to Claude Code through an apiKeyHelper passed with --settings, so the
+# CLI does not stop at its API key approval prompt. See claude-launcher.sh.
+#
+# The launcher lives in /usr/local/sbin, which comes before /usr/local/bin in
+# PATH, so a bare `claude` reaches it first. The native binary stays at its
+# documented path and keeps its name: OpenShell matches a network policy's
+# `binaries` against the kernel-resolved /proc/<pid>/exe, and profiles commonly
+# list `/usr/local/bin/claude` or a `**/claude` glob. A renamed copy (claude-real
+# or /usr/local/libexec/claude) would match neither exactly, and an exact-path
+# rule would deny every request. The launcher execs the native binary, so the
+# process that talks to the network is always /usr/local/bin/claude.
+COPY claude-launcher.sh /mnt/rootfs/usr/local/sbin/claude
+RUN chmod 0755 /mnt/rootfs/usr/local/sbin/claude
+
 # Now create our final image with reduced layers
 FROM scratch
 COPY --from=builder /mnt/rootfs/ /
-# Notify the SDK/ACP client where claude binary is located
-ENV CLAUDE_CODE_EXECUTABLE=/usr/local/bin/claude
+# Notify the SDK/ACP client where claude binary is located. It must be the
+# launcher so ACP sessions go through it too.
+ENV CLAUDE_CODE_EXECUTABLE=/usr/local/sbin/claude
 CMD ["claude", "--dangerously-skip-permissions"]
